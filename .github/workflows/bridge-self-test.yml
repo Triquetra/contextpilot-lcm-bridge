@@ -1,0 +1,53 @@
+name: bridge-self-test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Weekly: Monday 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  self-test:
+    name: self-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout bridge
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Resolve pinned commits
+        id: pins
+        run: |
+          echo "contextpilot=$(python scripts/ci_pins.py contextpilot)" >> "$GITHUB_OUTPUT"
+          echo "hermes-lcm=$(python scripts/ci_pins.py hermes-lcm)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout ContextPilot at pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: EfficientContext/ContextPilot
+          ref: ${{ steps.pins.outputs.contextpilot }}
+          path: upstream/contextpilot
+
+      - name: Checkout hermes-lcm at pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: stephenschoettler/hermes-lcm
+          ref: ${{ steps.pins.outputs.hermes-lcm }}
+          path: upstream/hermes-lcm
+
+      - name: Run bridge self-test against pinned upstreams
+        run: python test_bridge.py --upstream-dir upstream --verify-pins

@@ -1,0 +1,14 @@
+{
+  "contextpilot": {
+    "repo": "EfficientContext/ContextPilot",
+    "commit": "1fa0a143fdeda344585666648ab2b30cb7fea77f",
+    "release": null,
+    "tested_at": "2026-08-22"
+  },
+  "hermes-lcm": {
+    "repo": "stephenschoettler/hermes-lcm",
+    "commit": "854e8699e129774fa6320cfdae00d79cb08556c9",
+    "release": null,
+    "tested_at": "2026-08-22"
+  }
+}

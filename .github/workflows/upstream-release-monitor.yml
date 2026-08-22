@@ -1,0 +1,36 @@
+name: upstream-release-monitor
+
+on:
+  schedule:
+    # Daily: 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  monitor:
+    name: detect-and-retest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bridge
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run release monitor
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/release_monitor.py
+
+      - name: Report no-op
+        if: success()
+        run: echo "No new upstream releases detected (or pass path completed)."
