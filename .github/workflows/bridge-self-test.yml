@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: stephenschoettler/hermes-lcm
-          ref: ${{ steps.pins.outputs.hermes-lcm }}
+          ref: ${{ steps.pins.outputs['hermes-lcm'] }}
           path: upstream/hermes-lcm
 
       - name: Run bridge self-test against pinned upstreams
