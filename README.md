@@ -34,10 +34,10 @@ Copy the contents of this repository directly into a new folder named `contextpi
 
 This bridge is pinned to specific upstream commits to ensure stability. Support for other versions is not guaranteed.
 
-| Component | Pinned Commit | Test Date | Status |
-| :--- | :--- | :--- | :--- |
-| **ContextPilot** | `1fa0a14` | 2026-08-22 | Verified |
-| **hermes-lcm** | `854e869` | 2026-08-22 | Verified |
+| Component | Pinned Commit | Test Date | Status | Upstream Release Tag |
+| :--- | :--- | :--- | :--- | :--- |
+| **ContextPilot** | `1fa0a14` | 2026-08-22 | Verified | none (pinned commit 1fa0a14) |
+| **hermes-lcm** | `854e869` | 2026-08-22 | Verified | none (pinned commit 854e869) |
 
 ## Maintenance & Scope
 
