@@ -31,9 +31,10 @@ jobs:
 
       - name: Resolve pinned commits
         id: pins
+        shell: bash
         run: |
           echo "contextpilot=$(python scripts/ci_pins.py contextpilot)" >> "$GITHUB_OUTPUT"
-          echo "hermes-lcm=$(python scripts/ci_pins.py hermes-lcm)" >> "$GITHUB_OUTPUT"
+          echo "hermes_lcm=$(python scripts/ci_pins.py hermes-lcm)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout ContextPilot at pinned commit
         uses: actions/checkout@v4
@@ -46,7 +47,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: stephenschoettler/hermes-lcm
-          ref: ${{ steps.pins.outputs['hermes-lcm'] }}
+          ref: ${{ steps.pins.outputs.hermes_lcm }}
           path: upstream/hermes-lcm
 
       - name: Run bridge self-test against pinned upstreams
