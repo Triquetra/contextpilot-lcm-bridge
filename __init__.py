@@ -44,7 +44,7 @@ def _resolve_hermes_home():
         p = Path(val)
         if p.exists():
             return str(p)
-        # On MSYS/bash, /c/Users/... needs to be C:\Users\...
+        # On MSYS/bash, /c/... paths need conversion to Windows drive form
         if val.startswith("/c/"):
             win_path = "C:\\" + val[3:].replace("/", "\\")
             if Path(win_path).exists():
