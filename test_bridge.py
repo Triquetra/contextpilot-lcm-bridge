@@ -39,10 +39,13 @@ REPO_ROOT = Path(__file__).resolve().parent
 PINS = json.loads((REPO_ROOT / "upstream-pins.json").read_text(encoding="utf-8"))
 
 FAILURES: list[str] = []
+CHECKS_PASSED = 0
 
 
 def check(cond: bool, label: str, detail: str = "") -> None:
+    global CHECKS_PASSED
     if cond:
+        CHECKS_PASSED += 1
         print(f"  ok: {label}")
     else:
         msg = f"FAIL: {label}"
@@ -259,10 +262,18 @@ def main() -> int:
     # ── Tool surface delegation ──
     schemas = engine.get_tool_schemas()
     names = [s.get("name") for s in schemas]
-    check(names == ["lcm_grep", "lcm_recall", "lcm_recent", "lcm_load_session",
-                    "lcm_describe", "lcm_expand", "lcm_expand_query", "lcm_status",
-                    "lcm_inspect", "lcm_doctor"],
-          "20. all 10 LCM tools exposed", ",".join(names))
+    # The exact tool set is owned by the pinned upstream LCM engine, so assert
+    # the CONTRACT (namespacing, uniqueness, the core tools) instead of a frozen
+    # list. A hardcoded list goes red on every upstream release that adds a
+    # tool, and that red gets misread as a broken bridge rather than a stale
+    # expectation — which is exactly what the v0.5.0 pin bump produced.
+    engine_names = [s.get("name") for s in engine._compressor.get_tool_schemas()]
+    core_tools = {"lcm_grep", "lcm_recall", "lcm_expand", "lcm_status"}
+    check(bool(names) and names == engine_names,
+          f"20a. all {len(engine_names)} LCM tools exposed (matches upstream engine)",
+          ",".join(names))
+    check(core_tools.issubset(set(names)) and len(names) == len(set(names)),
+          "20b. core LCM tools present, names unique", ",".join(names))
 
     import json as _json
     out = engine.handle_tool_call("lcm_grep", {"query": "test"})
@@ -307,6 +318,26 @@ def main() -> int:
     check(ctx.engine is not None and ctx.engine.name == "contextpilot-lcm-bridge",
           "30. register() registers the bridge engine")
 
+    # ── Init-order regression: tools must exist BEFORE on_session_start ──
+    # Hermes injects engine tools from get_tool_schemas() (agent_init.py:2909)
+    # before on_session_start() (:2933) builds the compressor. An inherited
+    # implementation returns [] while _compressor is None, silently dropping
+    # every lcm_* tool from the tool payload — a failure that is invisible to
+    # every check above, because they all run AFTER _ensure_compressor().
+    fresh = BridgeClass()
+    pre_names = [s.get("name") for s in fresh.get_tool_schemas()]
+    check(fresh._compressor is not None,
+          "31a. get_tool_schemas() builds LCM before session start")
+    check(bool(pre_names),
+          "31b. tools exposed on the pre-session call "
+          "(the agent-init order that drops them)", ",".join(pre_names) or "(none)")
+    pre_call = fresh.handle_tool_call("lcm_status", {})
+    try:
+        _json.loads(pre_call)
+        check(True, "31c. handle_tool_call works pre-session")
+    except Exception:
+        check(False, "31c. handle_tool_call works pre-session", pre_call[:120])
+
     if not keep:
         shutil.rmtree(env_home, ignore_errors=True)
 
@@ -316,7 +347,8 @@ def main() -> int:
         for f in FAILURES:
             print(f"  {f}")
         return 1
-    print("=== All 30 bridge delegation tests passed against pinned upstreams ===")
+    print(f"=== All {CHECKS_PASSED} bridge delegation tests passed "
+          f"against pinned upstreams ===")
     return 0
 
 

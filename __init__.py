@@ -31,11 +31,23 @@ ContextPilotEngine = None
 
 
 def _resolve_hermes_home():
-    """Resolve HERMES_HOME, handling both Windows-native and MSYS paths."""
+    """Resolve HERMES_HOME, handling both Windows-native and MSYS paths.
+
+    In profile mode (HERMES_HOME = <root>/profiles/<name>) user plugins are
+    installed in the SHARED root's plugins/ dir; the plugin manager itself
+    scans the shared root first and only then the profile home. Mirror that
+    precedence so sibling plugin imports (contextpilot, hermes-lcm) resolve
+    to the same directories the plugin manager loads them from.
+    """
     # Try Hermes's own resolver first (correct in all cases)
     try:
-        from hermes_constants import get_hermes_home
-        return str(get_hermes_home())
+        from hermes_constants import get_hermes_home, get_default_hermes_root
+        home = get_hermes_home()
+        root = get_default_hermes_root()
+        if root is not None and str(home) != str(root) and str(home).startswith(str(root)):
+            # Profile-mode home: use the shared root where user plugins live
+            home = root
+        return str(home)
     except ImportError:
         pass
     # Fall back to env var
@@ -179,7 +191,7 @@ def _build_bridge_class():
             if self._compressor is not None:
                 return
 
-            hermes_home = os.environ.get("HERMES_HOME", "")
+            hermes_home = _resolve_hermes_home()
             try:
                 self._compressor = LCMEngine(config=None, hermes_home=hermes_home)
                 self._lcm_active = True
@@ -195,6 +207,27 @@ def _build_bridge_class():
                 return
 
             self._sync_compressor_state()
+
+        def get_tool_schemas(self):
+            """Ensure LCM is built BEFORE returning tool schemas.
+
+            Hermes agent init injects engine tools from get_tool_schemas()
+            (agent_init.py:2909) before on_session_start() (agent_init.py:2933)
+            creates the compressor, so the inherited ContextPilotEngine
+            implementation — which returns [] while self._compressor is None —
+            would silently drop all lcm_* tools from the tool payload.
+            """
+            self._ensure_compressor()
+            schemas = []
+            if self._compressor:
+                schemas.extend(self._compressor.get_tool_schemas())
+            return schemas
+
+        def handle_tool_call(self, name, args, **kwargs):
+            self._ensure_compressor()
+            if self._compressor:
+                return self._compressor.handle_tool_call(name, args, **kwargs)
+            return json.dumps({"error": f"Unknown tool: {name}"})
 
         def compress(self, messages, current_tokens=None, **kwargs):
             """Delegate to LCM, then clear ContextPilot's stale dedup caches."""
