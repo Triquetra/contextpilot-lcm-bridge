@@ -78,9 +78,31 @@ def semver(tag: str) -> tuple:
         return (-1, ())
 
 
+def _token() -> str:
+    """GitHub token: process env, else ~/.hermes/.env.
+
+    The unauthenticated API allows 60 requests/hour, which a monitor plus the
+    other GitHub jobs on this host will exhaust — and a 403 rate-limit error
+    flips the monitor's output to an error line, which looks like a real change
+    and wakes the agent spuriously. Reading the token the host already stores
+    keeps the limit at 5000/hour.
+    """
+    tok = os.environ.get("GITHUB_TOKEN", "").strip()
+    if tok:
+        return tok
+    envf = Path.home() / ".hermes" / ".env"
+    try:
+        for ln in envf.read_text(encoding="utf-8").splitlines():
+            if ln.startswith("GITHUB_TOKEN="):
+                return ln.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
 def _api_get(url: str) -> Any:
     req = urllib.request.Request(url)
-    token = os.environ.get("GITHUB_TOKEN", "")
+    token = _token()
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     req.add_header("Accept", "application/vnd.github+json")
