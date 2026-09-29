@@ -19,16 +19,53 @@ This bridge requires the following plugins to be already installed in your Herme
 
 ## Installation
 
-### Option 1: Symlink (Recommended)
-If you are developing or managing plugins via a separate directory, symlink this repository into your Hermes plugins folder:
+### Option 1: Clone + symlink (recommended)
+
+The bridge installs as a git checkout symlinked into the plugins directory, so
+updates are a `git reset --hard <tag>` with no copy step and no drift:
 
 ```bash
-ln -s /path/to/contextpilot-lcm-bridge $HERMES_HOME/plugins/contextpilot-lcm-bridge
+git clone https://github.com/Triquetra/contextpilot-lcm-bridge.git ~/projects/contextpilot-lcm-bridge
+ln -s ~/projects/contextpilot-lcm-bridge "$HERMES_HOME/plugins/contextpilot-lcm-bridge"
 ```
 
-### Option 2: Manual Fallback
-Copy the contents of this repository directly into a new folder named `contextpilot-lcm-bridge` within your Hermes plugins directory:
+Or run `scripts/install.sh`, which resolves `$HERMES_HOME` and does the same
+(backing up an existing directory first).
+
+### Option 2: Manual fallback
+
+Copy the contents of this repository directly into a new folder named
+`contextpilot-lcm-bridge` within your Hermes plugins directory:
 `$HERMES_HOME/plugins/contextpilot-lcm-bridge/`
+
+> An installed copy does **not** update itself. Note that a manual copy carries
+> no `.git`, so `scripts/check_and_update.py` (below) cannot run against it.
+
+## Updating an installed copy
+
+`scripts/check_and_update.py` syncs an installed checkout to the latest
+published release of this repository:
+
+1. detects the newest non-prerelease release tag
+2. hard-resets the checkout to that tag
+3. runs `test_bridge.py` — the authoritative compatibility gate — against the
+   plugins **actually installed** in `$HERMES_HOME/plugins`
+4. on gate failure, restores the previous revision and reports the first failing
+   assertion, so a broken bridge is never left serving a live engine
+
+It refuses to touch a checkout with tracked local modifications, because
+`reset --hard` would destroy them.
+
+Exit codes: `0` current or updated, `1` gate failed and rolled back, `2` error.
+It is designed to run as a Hermes cron `monitor_script`, so its stdout is
+deterministic (stable sentinels, no timestamps): a steady state hashes
+identically and stays silent, and only a real update or a gate failure wakes the
+agent.
+
+```bash
+python3 scripts/check_and_update.py            # sync if a new release exists
+python3 scripts/check_and_update.py --dry-run  # report only
+```
 
 ## Compatibility Table
 
