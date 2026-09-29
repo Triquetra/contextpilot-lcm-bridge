@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PINS_PATH = REPO_ROOT / "upstream-pins.json"
 PLUGIN_YAML_PATH = REPO_ROOT / "plugin.yaml"
 README_PATH = REPO_ROOT / "README.md"
-TEST_SCRIPT = REPO_ROOT / "test_bridge.py"
+TEST_SCRIPT = REPO_ROOT / "tests" / "test_bridge.py"
 
 UPSTREAMS = {
     "contextpilot": {

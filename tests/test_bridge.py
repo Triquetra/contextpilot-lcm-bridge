@@ -35,7 +35,7 @@ import tempfile
 import types
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 PINS = json.loads((REPO_ROOT / "upstream-pins.json").read_text(encoding="utf-8"))
 
 FAILURES: list[str] = []
@@ -340,6 +340,36 @@ def main() -> int:
 
     if not keep:
         shutil.rmtree(env_home, ignore_errors=True)
+
+    # ── Host compressor-contract compliance (pre-existing defect) ──
+    # agent_init assigns THIS engine object to agent.context_compressor, but
+    # tui_gateway/session_compression.py drives it through ContextCompressor's
+    # private interface. Without these two methods every compression-config save
+    # raised AttributeError — leaving the engine holding partially-applied host
+    # config, after the other keys had already been written.
+    engine2 = BridgeClass()
+    engine2._ensure_compressor()
+    check(engine2._coerce_threshold_tokens_cap(4096) == 4096
+          and engine2._coerce_threshold_tokens_cap(0) is None
+          and engine2._coerce_threshold_tokens_cap("bogus") is None,
+          "32. _coerce_threshold_tokens_cap matches core semantics")
+    check(engine2._effective_threshold_percent(100_000, 0.5) == 0.75
+          and engine2._effective_threshold_percent(1_000_000, 0.5) == 0.5,
+          "33. _effective_threshold_percent small-context floor")
+
+    # ── Structural guard: the plugin directory's *.py glob contract ──
+    # Hermes' plugin loader (plugins/plugin_loader.py:117) executes EVERY
+    # `*.py` in a plugin directory — not just `__init__.py` — inside the host
+    # process, because the repo root IS the plugin directory. A self-test that
+    # installs a stub `agent` module at import time therefore replaces the real
+    # `agent` package in the running Hermes interpreter: the bridge then
+    # subclasses the stub ABC, every `from agent import ...` fails, and other
+    # plugins fail to load ("'agent' is not a package"). Keep test code out of
+    # the root — it belongs in a subdirectory, which the loader never globs.
+    root_py = sorted(p.name for p in REPO_ROOT.glob("*.py"))
+    check(root_py == ["__init__.py"],
+          "35. plugin root holds only __init__.py (loader execs every *.py here)",
+          f"found: {root_py}")
 
     print()
     if FAILURES:

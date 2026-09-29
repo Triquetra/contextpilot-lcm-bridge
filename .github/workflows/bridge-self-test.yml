@@ -51,4 +51,4 @@ jobs:
           path: upstream/hermes-lcm
 
       - name: Run bridge self-test against pinned upstreams
-        run: python test_bridge.py --upstream-dir upstream --verify-pins
+        run: python tests/test_bridge.py --upstream-dir upstream --verify-pins

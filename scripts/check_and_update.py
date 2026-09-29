@@ -189,7 +189,7 @@ def resolve_hermes_home() -> Path:
 
 
 def run_gate(repo: "Repo", upstream_dir: Path):
-    script = repo.root / "test_bridge.py"
+    script = repo.root / "tests" / "test_bridge.py"
     if not script.is_file():
         return 2, f"FAIL: {script} is missing from the release"
     r = subprocess.run(

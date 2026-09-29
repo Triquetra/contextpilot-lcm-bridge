@@ -48,7 +48,7 @@ published release of this repository:
 
 1. detects the newest non-prerelease release tag
 2. hard-resets the checkout to that tag
-3. runs `test_bridge.py` — the authoritative compatibility gate — against the
+3. runs `tests/test_bridge.py` — the authoritative compatibility gate — against the
    plugins **actually installed** in `$HERMES_HOME/plugins`
 4. on gate failure, restores the previous revision and reports the first failing
    assertion, so a broken bridge is never left serving a live engine

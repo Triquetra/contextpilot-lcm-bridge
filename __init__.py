@@ -229,6 +229,52 @@ def _build_bridge_class():
                 return self._compressor.handle_tool_call(name, args, **kwargs)
             return json.dumps({"error": f"Unknown tool: {name}"})
 
+        # ── Host compressor-contract compliance ──────────────────────────
+        # agent_init._build_context_engine() assigns THIS engine object to
+        # agent.context_compressor, but the live compression-config path
+        # (tui_gateway/session_compression.py) then drives it through
+        # ContextCompressor's private interface: it writes the compression keys
+        # and finally calls cc._coerce_threshold_tokens_cap() (:169) and
+        # cc._effective_threshold_percent() (:150). Without these, every config
+        # save raises AttributeError; because the failing assignment comes AFTER
+        # the other keys are already applied, the engine is left holding
+        # partially-applied host config.
+        #
+        # Note the host deliberately does NOT push its compaction policy into an
+        # external engine (agent_init: "External engines own compaction policy").
+        # These shims exist to keep the host's config path well-defined, not to
+        # make the host threshold drive LCM.
+        #
+        # Each delegates to the real ContextCompressor when a Hermes install is
+        # present (so the semantics cannot drift), and falls back to the
+        # documented equivalent when running isolated — the self-test loads this
+        # module with no `agent` package on the path.
+        @staticmethod
+        def _coerce_threshold_tokens_cap(value):
+            """Positive int, or None for "no cap" (matches core)."""
+            try:
+                from agent.context_compressor import ContextCompressor
+                return ContextCompressor._coerce_threshold_tokens_cap(value)
+            except Exception:
+                try:
+                    ivalue = int(value) if value is not None else 0
+                except (TypeError, ValueError):
+                    return None
+                return ivalue if ivalue > 0 else None
+
+        @staticmethod
+        def _effective_threshold_percent(context_length, threshold_percent):
+            """Raise-only small-context floor: sub-512K models trigger at >=75%."""
+            try:
+                from agent.context_compressor import ContextCompressor
+                return ContextCompressor._effective_threshold_percent(
+                    context_length, threshold_percent
+                )
+            except Exception:
+                if context_length and context_length < 512_000:
+                    return max(threshold_percent, 0.75)
+                return threshold_percent
+
         def compress(self, messages, current_tokens=None, **kwargs):
             """Delegate to LCM, then clear ContextPilot's stale dedup caches."""
             self._ensure_compressor()
