@@ -37,11 +37,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PINS_PATH = REPO_ROOT / "upstream-pins.json"
 PLUGIN_YAML_PATH = REPO_ROOT / "plugin.yaml"
+README_PATH = REPO_ROOT / "README.md"
 TEST_SCRIPT = REPO_ROOT / "test_bridge.py"
 
 UPSTREAMS = {
-    "contextpilot": {"repo": "EfficientContext/ContextPilot"},
-    "hermes-lcm": {"repo": "stephenschoettler/hermes-lcm"},
+    "contextpilot": {
+        "repo": "EfficientContext/ContextPilot",
+        "display": "ContextPilot",
+    },
+    "hermes-lcm": {
+        "repo": "stephenschoettler/hermes-lcm",
+        "display": "hermes-lcm",
+    },
 }
 
 API_BASE = "https://api.github.com"
@@ -220,6 +227,54 @@ def write_pins(pins: dict) -> None:
     )
 
 
+# ── README compatibility table ──────────────────────────────────────────────
+
+README_TABLE_HEADER = (
+    "| Component | Pinned Commit | Test Date | Status | Upstream Release Tag |\n"
+    "| :--- | :--- | :--- | :--- | :--- |\n"
+)
+
+
+def render_readme_table(pins: dict) -> str:
+    """Render the compatibility table rows from the pins, in UPSTREAMS order.
+
+    The README table is a VIEW of upstream-pins.json. It must be regenerated
+    whenever the pins change, or the published table contradicts the pins that
+    CI actually tests against (and users read the table to decide whether an
+    upstream bump is safe).
+    """
+    rows = ""
+    for key in UPSTREAMS:
+        pin = pins[key]
+        display = UPSTREAMS[key]["display"]
+        commit = pin["commit"][:7]
+        tested = pin.get("tested_at", "")
+        release = pin.get("release")
+        tag = f"`{release}`" if release else f"none (pinned commit {commit})"
+        rows += f"| **{display}** | `{commit}` | {tested} | Verified | {tag} |\n"
+    return README_TABLE_HEADER + rows
+
+
+def write_readme_table(pins: dict) -> None:
+    """Replace the compatibility table in README.md in place.
+
+    Raises if the anchor or table shape is not found — a silent no-op here is
+    exactly the bug this function exists to prevent.
+    """
+    text = README_PATH.read_text(encoding="utf-8")
+    marker = "| Component | Pinned Commit | Test Date | Status | Upstream Release Tag |"
+    start = text.find(marker)
+    if start < 0:
+        raise RuntimeError("README.md has no compatibility table header to update")
+    end = text.find("\n\n", start)
+    if end < 0:
+        raise RuntimeError("could not find the end of the README compatibility table")
+    README_PATH.write_text(
+        text[:start] + render_readme_table(pins).rstrip("\n") + text[end:],
+        encoding="utf-8",
+    )
+
+
 # ── Git / release / issue actions ───────────────────────────────────────────
 
 def git(cwd: Path, *args: str) -> None:
@@ -271,15 +326,18 @@ def do_pass_path(repo: str, pins: dict, new_releases: dict, dry_run: bool) -> No
     if dry_run:
         print(f"[dry-run] would bump plugin.yaml: {old_version} -> {new_version}")
         print(f"[dry-run] would update upstream-pins.json: {json.dumps(pins, indent=2)}")
+        print(f"[dry-run] would regenerate README.md compatibility table:")
+        print(render_readme_table(pins))
         print(f"[dry-run] would commit + tag v{new_version} + push + create release")
         print(f"[dry-run] release body:\n{release_notes}")
         return
 
     write_plugin_version(new_version)
     write_pins(pins)
+    write_readme_table(pins)
     git(REPO_ROOT, "config", "user.name", "github-actions[bot]")
     git(REPO_ROOT, "config", "user.email", "github-actions[bot]@users.noreply.github.com")
-    git(REPO_ROOT, "add", "plugin.yaml", "upstream-pins.json")
+    git(REPO_ROOT, "add", "plugin.yaml", "upstream-pins.json", "README.md")
     git(REPO_ROOT, "commit", "-m",
         f"chore: bump pins to {summary} (bridge v{new_version})")
     git(REPO_ROOT, "tag", f"v{new_version}")

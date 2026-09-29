@@ -1,4 +1,4 @@
 name: contextpilot-lcm-bridge
 type: context_engine
-version: "0.1.1"
+version: "0.1.2"
 description: "Bridge: ContextPilot per-turn dedup/reorder + hermes-lcm DAG-based lossless compaction. Inherits ContextPilotEngine, delegates compaction to LCMEngine. Requires both contextpilot and hermes-lcm plugins installed."

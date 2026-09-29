@@ -36,7 +36,7 @@ This bridge is pinned to specific upstream commits to ensure stability. Support 
 
 | Component | Pinned Commit | Test Date | Status | Upstream Release Tag |
 | :--- | :--- | :--- | :--- | :--- |
-| **ContextPilot** | `1fa0a14` | 2026-08-22 | Verified | none (pinned commit 1fa0a14) |
+| **ContextPilot** | `7f3b62b` | 2026-09-25 | Verified | `v0.5.0` |
 | **hermes-lcm** | `854e869` | 2026-08-22 | Verified | none (pinned commit 854e869) |
 
 ## Maintenance & Scope
