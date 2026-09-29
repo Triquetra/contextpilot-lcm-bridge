@@ -41,6 +41,21 @@ Copy the contents of this repository directly into a new folder named
 > An installed copy does **not** update itself. Note that a manual copy carries
 > no `.git`, so `scripts/check_and_update.py` (below) cannot run against it.
 
+## Repository layout (important if you clone or symlink)
+
+Hermes' plugin loader executes **every `*.py` in the plugin directory**, not just
+`__init__.py` (`plugins/plugin_loader.py`). Because this repository *is* the
+plugin directory when symlinked, any module that runs side effects at import
+time runs them **inside the Hermes process**.
+
+In particular, a self-test that installs a stub `agent` module to stand in for a
+missing Hermes install would replace the real `agent` package in the running
+interpreter, breaking unrelated plugins and session finalization.
+
+So: keep the plugin root import-clean. Only `__init__.py` may live there — test
+and tooling code goes in `tests/` and `scripts/`, which the loader never globs.
+`tests/test_bridge.py` asserts this invariant so it cannot regress.
+
 ## Updating an installed copy
 
 `scripts/check_and_update.py` syncs an installed checkout to the latest
