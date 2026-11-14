@@ -186,6 +186,10 @@ def _build_bridge_class():
             # add our _lcm_active flag.
             super().__init__()
             self._lcm_active = False
+            # Threshold last adopted FROM the inner engine. A different
+            # self.threshold_percent therefore means the host wrote one
+            # (compression.threshold), and it has to be pushed back down.
+            self._lcm_threshold_seen = None
 
         def _ensure_compressor(self):
             """Override: create LCMEngine instead of ContextCompressor."""
@@ -208,6 +212,91 @@ def _build_bridge_class():
                 return
 
             self._sync_compressor_state()
+
+        def _sync_compressor_state(self):
+            """Adopt the inner engine's state WITHOUT discarding the host's window.
+
+            agent_init gives the engine the real window through update_model()
+            BEFORE get_tool_schemas() builds LCM here (agent_init: update_model ->
+            get_tool_schemas -> on_session_start), and then forwards OUR
+            context_length into on_session_start(). A freshly built engine reports
+            context_length 0, so the inherited sync would both lose the window and
+            teach LCM the model has none: context_length/threshold_tokens stay 0,
+            should_compress() is permanently False, and compaction fires only
+            through forced overflow recovery — i.e. AFTER the request already
+            exceeded the model window (live: 1,037,032 tokens on a 1M model with a
+            0.5 threshold). Hand the known window to LCM first, then adopt.
+            """
+            inner = self._compressor
+            if inner is None:
+                return
+            host_window = int(getattr(self, "context_length", 0) or 0)
+            if int(getattr(inner, "context_length", 0) or 0) <= 0 and host_window > 0:
+                try:
+                    inner.update_model(
+                        model=getattr(self, "_model", "") or "",
+                        context_length=host_window,
+                        base_url=getattr(self, "_base_url", "") or "",
+                        api_key=getattr(self, "_api_key", "") or "",
+                        provider=getattr(self, "_provider", "") or "",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[contextpilot-lcm] could not hand the %s-token window to LCM: %s",
+                        host_window, exc,
+                    )
+            super()._sync_compressor_state()
+            self._lcm_threshold_seen = getattr(self, "threshold_percent", None)
+
+        def _apply_host_threshold(self):
+            """Push a host-written compression.threshold into LCM (live knob).
+
+            LCM derives its trigger from its own ``context_threshold`` (config.yaml
+            ``lcm.context_threshold`` -> ``compression.threshold`` -> default), which
+            it reads once at construction. A runtime change to the visible setting
+            only writes this object's ``threshold_percent``, so without this push the
+            UI would claim a threshold LCM never uses until the process restarts.
+            """
+            seen = self._lcm_threshold_seen
+            current = getattr(self, "threshold_percent", None)
+            inner = self._compressor
+            if inner is None or seen is None or current is None:
+                return
+            try:
+                if abs(float(current) - float(seen)) < 1e-9:
+                    return
+            except (TypeError, ValueError):
+                return
+            try:
+                config = getattr(inner, "_config", None)
+                if config is None:
+                    return
+                config.context_threshold = float(current)
+                sources = getattr(config, "config_sources", None)
+                if isinstance(sources, dict):
+                    sources["context_threshold"] = "host:compression.threshold"
+                window = int(getattr(inner, "raw_context_length", 0) or 0) or int(
+                    getattr(inner, "context_length", 0) or 0
+                )
+                if window > 0:
+                    inner._set_context_length(window, source="host-compression-threshold")
+                super()._sync_compressor_state()
+                self._lcm_threshold_seen = getattr(self, "threshold_percent", None)
+                logger.info(
+                    "[contextpilot-lcm] applied host compression threshold %.3f "
+                    "(LCM threshold_tokens=%s)",
+                    float(current), getattr(inner, "threshold_tokens", 0),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[contextpilot-lcm] could not apply host compression threshold %.3f: %s",
+                    float(current), exc,
+                )
+
+        def should_compress(self, prompt_tokens=None):
+            self._ensure_compressor()
+            self._apply_host_threshold()
+            return self._compressor.should_compress(prompt_tokens)
 
         def get_tool_schemas(self):
             """Ensure LCM is built BEFORE returning tool schemas.

@@ -408,6 +408,44 @@ def main() -> int:
           "34c. filtering keeps accepted kwargs and drops the rest",
           repr(seen_kwargs))
 
+    # ── agent_init order: the host window must reach LCM ──
+    # agent_init gives the engine the real window in update_model() BEFORE
+    # get_tool_schemas() builds LCM inside the bridge, then forwards the ENGINE's own
+    # context_length into on_session_start(). Building the inner engine late made the
+    # inherited _sync_compressor_state adopt its zero window, so LCM kept
+    # context_length=0 / threshold_tokens=0 and should_compress() stayed False forever:
+    # compaction fired only through forced overflow recovery, AFTER the request already
+    # exceeded the model window (live: 1,037,032 tokens on a 1M model, 0.5 threshold).
+    # The engine above cannot show this — it builds its compressor first.
+    WINDOW = 1_000_000
+    engine4 = BridgeClass()
+    engine4.update_model(model="deepseek-v4.1-flash", context_length=WINDOW,
+                         base_url="https://api.deepseek.com", api_key="x",
+                         provider="deepseek")
+    engine4.get_tool_schemas()          # builds LCM here, exactly like agent_init
+    check(engine4._compressor.context_length == WINDOW,
+          "36a. LCM learned the window even though it was built after update_model",
+          f"lcm.context_length={engine4._compressor.context_length}")
+    window_threshold = int(WINDOW * engine4._compressor.context_threshold)
+    check(engine4._compressor.threshold_tokens == window_threshold
+          and engine4.should_compress(window_threshold - 1_000) is False
+          and engine4.should_compress(window_threshold + 1_000) is True,
+          "36b. should_compress triggers at the threshold, not only on overflow",
+          f"lcm.threshold_tokens={engine4._compressor.threshold_tokens}")
+    # The host forwards OUR context_length into on_session_start (agent_init:2007).
+    engine4.on_session_start("ci-session-window", model="deepseek-v4.1-flash",
+                             context_length=getattr(engine4, "context_length", 0))
+    check(engine4._compressor.context_length == WINDOW,
+          "36c. on_session_start keeps the window (host forwards the engine's own value)",
+          f"lcm.context_length={engine4._compressor.context_length}")
+    # ── The visible knob: compression.threshold written at runtime ──
+    engine4.threshold_percent = 0.5
+    check(engine4.should_compress(int(WINDOW * 0.45)) is False
+          and engine4.should_compress(int(WINDOW * 0.55)) is True,
+          "36d. a host compression.threshold change reaches LCM's trigger",
+          f"lcm.context_threshold={engine4._compressor.context_threshold} "
+          f"threshold_tokens={engine4._compressor.threshold_tokens}")
+
     # ── Structural guard: the plugin directory's *.py glob contract ──
     # Hermes' plugin loader (plugins/plugin_loader.py:117) executes EVERY
     # `*.py` in a plugin directory — not just `__init__.py` — inside the host
