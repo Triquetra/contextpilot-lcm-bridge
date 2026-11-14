@@ -13,6 +13,7 @@ interface stays stable.
 Requires: contextpilot and hermes-lcm plugins already installed in Hermes.
 """
 
+import inspect
 import json
 import logging
 import os
@@ -275,11 +276,36 @@ def _build_bridge_class():
                     return max(threshold_percent, 0.75)
                 return threshold_percent
 
+        @staticmethod
+        def _engine_compress_kwargs(fn, current_tokens, extra):
+            """Only the kwargs ``fn`` actually declares.
+
+            The host picks the compaction kwarg set by inspecting THIS engine's
+            ``compress`` signature, and ``**kwargs`` there reads as "accepts
+            everything" — so every kwarg the host has (``bypass_cooldown``,
+            ``memory_context``, and whatever it adds next) arrives here. LCM's
+            ``compress`` stops at ``force``; forwarding the rest raised
+            ``TypeError: CompactionMixin.compress() got an unexpected keyword
+            argument 'bypass_cooldown'`` on provider-proven overflow recovery,
+            which killed the turn instead of compacting it.
+            """
+            candidates = {"current_tokens": current_tokens, **extra}
+            try:
+                params = inspect.signature(fn).parameters
+            except (TypeError, ValueError):
+                # Uninspectable: current_tokens is the one kwarg the ABC has always had.
+                return {"current_tokens": current_tokens}
+            if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                return candidates
+            return {k: v for k, v in candidates.items() if k in params}
+
         def compress(self, messages, current_tokens=None, **kwargs):
             """Delegate to LCM, then clear ContextPilot's stale dedup caches."""
             self._ensure_compressor()
             result = self._compressor.compress(
-                messages, current_tokens=current_tokens, **kwargs,
+                messages, **self._engine_compress_kwargs(
+                    self._compressor.compress, current_tokens, kwargs,
+                ),
             )
             self.compression_count = getattr(self._compressor, "compression_count", 0)
             # After compaction, message structure changed — clear dedup state.

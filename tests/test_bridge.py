@@ -357,6 +357,57 @@ def main() -> int:
           and engine2._effective_threshold_percent(1_000_000, 0.5) == 0.5,
           "33. _effective_threshold_percent small-context floor")
 
+    # ── Host compression-kwargs contract ──
+    # The host decides which compaction kwargs to send by inspecting THIS
+    # engine's compress() signature (agent/conversation_compression.py::
+    # _supported_compression_kwargs). A `**kwargs` signature reads as "accepts
+    # everything", so the full candidate set — including kwargs added to the
+    # host after the pinned upstreams — arrives here. Blind-forwarding them to
+    # LCM (whose compress() stops at `force`) raised
+    # `TypeError: CompactionMixin.compress() got an unexpected keyword argument
+    # 'bypass_cooldown'` on every provider-proven overflow recovery, which
+    # killed the turn instead of compacting.
+    engine3 = BridgeClass()
+    engine3._ensure_compressor()
+    engine3.on_session_start("ci-session-kwargs", model="gpt-4", context_length=200000)
+    host_kwargs = dict(
+        current_tokens=40000, focus_topic="auth bug", force=False,
+        bypass_cooldown=True, memory_context="provider note",
+    )
+    try:
+        out3 = engine3.compress(small, **host_kwargs)
+        ok_kw, err_kw = len(out3) == len(small), ""
+    except TypeError as exc:
+        ok_kw, err_kw = False, f"{type(exc).__name__}: {exc}"
+    check(ok_kw,
+          "34a. host kwargs beyond LCM's signature (bypass_cooldown/"
+          "memory_context) are dropped, not forwarded", err_kw)
+    try:
+        engine3.compress(small, current_tokens=40000, bogus_future_kwarg=1)
+        ok_unknown, err_unknown = True, ""
+    except TypeError as exc:
+        ok_unknown, err_unknown = False, f"{type(exc).__name__}: {exc}"
+    check(ok_unknown, "34b. an unknown host kwarg is dropped too", err_unknown)
+    # Accepted kwargs must still reach LCM. Record what the delegation passes;
+    # functools.wraps keeps LCM's signature visible to inspect.signature (which
+    # follows __wrapped__), so the filter still sees the real contract.
+    import functools
+    seen_kwargs: dict = {}
+    real_compress = engine3._compressor.compress
+
+    @functools.wraps(real_compress)
+    def _recording_compress(messages, **kw):
+        seen_kwargs.update(kw)
+        return real_compress(messages, **kw)
+
+    engine3._compressor.compress = _recording_compress
+    engine3.compress(small, current_tokens=40000, force=True, bypass_cooldown=True)
+    check(seen_kwargs.get("current_tokens") == 40000
+          and seen_kwargs.get("force") is True
+          and "bypass_cooldown" not in seen_kwargs,
+          "34c. filtering keeps accepted kwargs and drops the rest",
+          repr(seen_kwargs))
+
     # ── Structural guard: the plugin directory's *.py glob contract ──
     # Hermes' plugin loader (plugins/plugin_loader.py:117) executes EVERY
     # `*.py` in a plugin directory — not just `__init__.py` — inside the host
